@@ -8,7 +8,7 @@
 ## 🎯 主角工具：verify_rota_pool.py
 
 > [!IMPORTANT]
-> **出身**：本脚本是 [go-ios](https://github.com/danielpaulus/go-ios) 所带来灵感的延伸。正如 go-ios 让 iOS 设备控制变得开放、可脚本化，`verify_rota_pool.py` 把“美国住宅 IP 地理验证”变成了自动化闭环。
+> **出身**：本脚本是 _rota_pool.py`
 > **闭环**：从您自建的代理池调度中心拉取代理列表 ➡️ 送入三源交叉验证模型 ➡️ 写回标签（US_Residential / Datacenter / 置信度分数）。
 
 > [!NOTE]
