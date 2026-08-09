@@ -1,44 +1,94 @@
-<p align="center">
-  <img src="./banner.png" alt="Project Banner" width="100%">
-</p>
+# 📘 iOS 流量情报 · 架构指南
 
-<h1 align="center">iOS Traffic Intel</h1>
-<p align="center">三源交叉验证（GeoIP 35% + ASN 40% + IPQS 25%）· 美国住宅 IP 置信度评分系统</p>
+![卷](https://img.shields.io/badge/架构指南-v1.0-8A2BE2?style=for-the-badge)
+![GFM](https://img.shields.io/badge/GitHub-原生兼容-brightgreen?style=for-the-badge)
+![池](https://img.shields.io/badge/池底座-崔庆才ProxyPool-orange?style=for-the-badge)
+![出口](https://img.shields.io/badge/出口-ProxyHat-blue?style=for-the-badge)
+![裁判](https://img.shields.io/badge/血统裁判-IPinfo-green?style=for-the-badge)
+![可视化](https://img.shields.io/badge/看板-Grafana-F46800?style=for-the-badge&logo=grafana&logoColor=white)
 
-## 🎯 主角工具：verify_rota_pool.py
+> "README is the FACE. Put makeup in a decent way." — Gaganpreet Kaur Kalsi
 
-> [!IMPORTANT]
-> **出身**：本脚本是 _rota_pool.py`
-> **闭环**：从您自建的代理池调度中心拉取代理列表 ➡️ 送入三源交叉验证模型 ➡️ 写回标签（US_Residential / Datacenter / 置信度分数）。
+**目录**：[选型](#一回-选型定座次)｜[组件](#二回-组件谱系)｜[存储](#三回-池府-redis-心法)｜[验证](#四回-判官双璧与精度靶)｜[链路](#全局链路流转)
 
-> [!NOTE]
-> **三源交叉验证模型（权重与检查项）**
-> - **① 多源 GeoIP 比对（35%）**：IPinfo + IP-API + MaxMind ➡️ 国家是否一致 = US？一致性 ≥ 67%？
-> - **② ASN + BGP 分析（40%）**：Team Cymru whois ➡️ ASN 是否美国注册？前缀粒度 /24+？已知住宅 ISP？
-> - **③ 外部实证（25%）**：IPQualityScore ➡️ fraud_score ≤ 50？residential = True？
+---
 
-> [!WARNING]
-> **IPv6 降级策略**：IPv6 地理精度仅 40–80% ➡️ 置信度整体 ×0.7 惩罚，阈值收紧为 confidence ≥ 70、checks_passed ≥ 3。
+## 一回 · 选型定座次
 
-## 🏗️ 架构与分工
+| 席位 | 选型 | 理由 |
+|------|------|------|
+| 池底座 | ✅ 崔庆才 ProxyPool | Redis+API 同架构，中文保姆文档 |
+| 出口 | ProxyHat | `-session-xxx` 绑美国住宅出口 |
+| 渲染 | mitmproxy2swagger | `.mitm` → API 地图 |
+| 执行 | bogdanfinn/tls-client | `safari_17.0_ios` 变声器 |
+| 储备 | utls | 遇查 JA3 之敌方才出山 |
+| 秒查 | GeoLite2 MMDB 本地 | 不劳 ip.sb |
+| 验血统 | IPinfo Privacy API | `type=residential` 方发放行牌 |
+| 可视化 | Grafana | Rota 池健康分 + 状态看板 |
 
-| 组件 | 语言 | 职责 | 不做什么 |
-|---|---|---|---|
-| `ios_traffic_intel` | Python | HAR 解析、API 提取、IDOR 代理池管理 | 流量内容分析 |
-| `GeoValidator` | Python | 多源 GeoIP + ASN 验证、置信度打分 | 设备控制 |
-| `自建代理池调度中心` | Go/Python | 代理池调度、健康检查、IP 轮换、API 提供 | 流量内容分析 |
-| `go-ios` | Go | iOS 设备管理、WDA 部署 | 代理池、漏洞扫描 |
+---
 
-<details>
-<summary>📂 点击展开：项目目录结构</summary>
+## 二回 · 组件谱系
+
+![图A 组件群像](./images/figA_family.png)
+
+| 组件 | 定位 | 一行事实 | 启用条件 |
+|------|------|----------|----------|
+| utls | TLS 握手定制 · 根原型 | 可逐字段 mimick iOS Safari ClientHello | 储备，目标查 JA3 时才启用 |
+| tls-client | 指纹伪装执行层 | `client_identifier` 含 `safari_17.0_ios` 等 | 多身份生成 |
+| 崔庆才 ProxyPool | 池底座 | settings/db/schedule/api 四件套架构 | Redis+API 基础 |
+| GeoLite2 | 归属秒查 | 国家级精度 99.8% | 本地 MMDB，只信外环 |
+| IPinfo | 血统验证 | `type` 三值：residential/datacenter/cellular | 入池放行仅认 residential |
+| ProxyHat | 出口供应商 | `-session-xxx` 绑定美国住宅出口 | 双锁之出口侧 |
+
+> 旁支参照：curl_cffi（C 系同类实现）、jhao104（同架构先行者）、Scamalytics（打分逻辑参考）。
+
+---
+
+## 三回 · 池府 Redis 心法
+
+**��功**：`redis-server`（Windows 走 WSL）→ 验活：`redis-cli ping` 回 `PONG`
 
 ```text
-.
-├── ios_traffic_intel/      # 核心库：流量解析、API 提取、漏洞检测逻辑
-│   ├── parsers/            # HAR / pcap 解析器
-│   ├── analyzers/          # IDOR / BOLA 模式检测
-│   └── validators/         # GeoIP / ASN 验证引擎
-├── scripts/                # 命令行工具与自动化脚本
-│   └── verify_rota_pool.py # 主角：代理池验证闭环脚本
-├── tests/                  # 单元测试
-└── docs/                   # 文档与参考资料
+ZCARD  proxies:universal                  # 池里几条命
+ZRANGE proxies:universal 0 9 WITHSCORES  # 前十强+健康分
+ZADD   proxies:universal 10 1.2.3.4:8080 # 手动喂池
+ZREM   proxies:universal 1.2.3.4:8080    # 逐出池
+```
+
+**口诀**：池乃有序集合，score 即健康分，高分者好学生。
+
+---
+
+## 四回 · 判官双璧与精度靶
+
+| 判官 | 看什么 | 硬伤 | 杀手锏 | 本府用法 |
+|------|--------|------|--------|----------|
+| GeoLite2 | 路由表+WHOIS | 看不穿住宅/机房 | 国家 99.8%+本地 MMDB | 秒查，只信外环 |
+| IPinfo | 探针+众包 | 付费限流 | type 三值 | 入池政审 |
+| Scamalytics | 欺诈模型 | 商业 | Fraud Score | 打分参考 |
+
+![图B 精度靶](./images/figB_target.png)
+
+> 🎯 **靶规**：外环绿=国家 99.8% ／ 中环橙=州 ~85% ／ 内环红=城市 ~70%。**只信外环，不赌内环**。
+
+---
+
+## 全局链路流转
+
+```mermaid
+sequenceDiagram
+    participant P as 📱 iPhone
+    participant M as 🧿 mitmproxy
+    participant H as 🎩 ProxyHat
+    participant I as 📡 IPinfo
+    participant R as ⚙️ Rota池
+    P->>M: Wi-Fi 代理流量
+    M->>H: upstream -session- 锁出口
+    H-->>M: 美国住宅出口
+    M->>I: 政审 type?
+    I-->>M: residential ✅
+    M->>R: 双锁身份入池
+```
+
+[⬆ 回卷首](#-ios-流量情报--架构指南)
